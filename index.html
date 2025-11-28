@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>互動式動詞配對遊戲 Ver 6.4 (修正拼字 & 實作分數遞減邏輯)</title>
+<title>互動式動詞配對遊戲 Ver 6.5 (Andy Lai老師製作)</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
@@ -60,6 +60,8 @@
     background: var(--morandi-pink-dark); color: #fff; font-size: 14px;
     padding: 4px 12px; border-radius: 20px; font-weight: 700;
     box-shadow: 2px 2px 5px var(--shadow-color); letter-spacing: 0.5px;
+    /* 調整 badge 的樣式以容納更長的文字 */
+    white-space: nowrap; 
   }
   p.lead{margin:0 0 20px; color:var(--text-secondary); font-size:16px}
   
@@ -319,7 +321,7 @@
 <div class="container" id="gameContainer">
   <div class="header-area">
     <h1>互動式動詞配對遊戲</h1>
-    <span class="version-badge">Ver 6.4 分數遞減邏輯</span>
+    <span class="version-badge">Ver 6.5 斗六家商Andy Lai老師製作</span>
   </div>
   <p class="lead">將句子拖曳到對應的時態與句型分類中。錯誤配對後重配，分數將遞減。</p>
 
@@ -547,10 +549,20 @@ function sample(i, verbContext = current){
   // Active Voice
   if(t.col==='Simple'){
     if(t.row==='Present') {
-        // *** 修正：處理 do/does 拼寫錯誤 ***
+        // *** 擴展：處理所有需要加 -es 的單字尾 (s, sh, ch, x, z, o) ***
+        // 這些單字結尾的動詞在第三人稱單數現在式時，需加上 -es。
+        
+        // 1. 處理 do 的特殊情況 (do -> does) - 保持特殊處理，確保正確性
         if (b === 'do') {
             return`${subject} ${highlight(`does`)} ${o}.`;
         }
+        
+        // 2. 處理其他符合 -es 規則的動詞 (catch, wash, fix, teach 等)
+        if (b.endsWith('s') || b.endsWith('sh') || b.endsWith('ch') || b.endsWith('x') || b.endsWith('z') || b.endsWith('o')) {
+             return`${subject} ${highlight(`${b}es`)} ${o}.`;
+        }
+        
+        // 3. 一般情況下加 -s (e.g., eat -> eats, write -> writes, buy -> buys)
         return`${subject} ${highlight(`${b}s`)} ${o}.`;
     }
     if(t.row==='Past')return`${subject} ${highlight(p)} ${o}.`;
@@ -843,7 +855,7 @@ function generateReportCard() {
         const state = cardId in cardState ? cardState[cardId] : { attempts: 0, initialError: false, isCorrect: false };
         const cardElement = target.querySelector('.sentence-card');
 
-        // 1. 未作答情況
+        // 1. 未作答情況 (此目標區無卡片)
         if (!cardElement) {
             errorListHTML += `
                 <div class="result-item wrong">
