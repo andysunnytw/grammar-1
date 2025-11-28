@@ -1,0 +1,1006 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>互動式動詞配對遊戲 Ver 6.4 (修正拼字 & 實作分數遞減邏輯)</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+<style>
+  /* --- 莫蘭迪色調設定 (Morandi Palette) --- */
+  :root{
+    /* 核心色調 */
+    --morandi-blue: #8DA1B9;       /* 霧霾藍 */
+    --morandi-blue-dark: #6D7E92;  /* 深霧藍 */
+    --morandi-pink: #D3C4C7;       /* 煙灰粉 */
+    --morandi-pink-dark: #B8A6AA;  /* 深煙粉 */
+    --morandi-green: #94A89A;      /* 鼠尾草綠 */
+    --morandi-beige: #E6E2DD;      /* 奶茶米灰 */
+    --morandi-yellow: #E0D8C3;     /* 燕麥黃 */
+    
+    /* 文字與背景 - 強化對比度 */
+    --text-primary: #495057;       /* 深灰藍文字 (更深，提高閱讀性) */
+    --text-secondary: #7E8A98;     /* 淺灰文字 (稍深，提高標籤辨識度) */
+    --bg: #F2F0EB;                 /* 溫暖米灰背景 */
+    --card-bg: #FCFAF7;            /* 幾近白的米色卡片背景 */
+    --border: #D3D7DD;             /* 柔和灰邊框 */
+    
+    /* 功能色映射 */
+    --accent: var(--morandi-blue);
+    --accent-dark: var(--morandi-blue-dark);
+    
+    --success: #94A89A;            /* 鼠尾草綠 (答對) */
+    --success-bg: #EFF3F1;         /* 淺綠背景 */
+    --error: #C48A8A;              /* 煙燻玫瑰紅 (答錯) */
+    --error-bg: #F7EEEE;           /* 淺紅背景 */
+    --verb-highlight: #D9A68C;     /* 柔和赤陶色 */
+    
+    --drop-zone-bg: #EBEFF2;       /* 極淺灰藍 */
+    --shadow-color: rgba(95, 107, 117, 0.15); /* 柔和深灰陰影 */
+  }
+  
+  body{
+    font-family:'Gen Jyuu Gothic', 'Noto Sans TC', Inter, system-ui, sans-serif;
+    margin:0; background:var(--bg); color:var(--text-primary);
+    line-height: 1.6; padding-bottom: 50px;
+  }
+  
+  .container{
+    max-width:1400px; margin:20px auto; padding:24px;
+    background:var(--card-bg); border-radius:24px;
+    box-shadow:0 15px 35px var(--shadow-color);
+    border: 1px solid #FFF;
+  }
+  
+  /* 標題區 */
+  .header-area { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+  h1{ margin:0; font-size:28px; color: var(--morandi-blue-dark); font-weight: 800; letter-spacing: 1px; }
+  .version-badge {
+    background: var(--morandi-pink-dark); color: #fff; font-size: 14px;
+    padding: 4px 12px; border-radius: 20px; font-weight: 700;
+    box-shadow: 2px 2px 5px var(--shadow-color); letter-spacing: 0.5px;
+  }
+  p.lead{margin:0 0 20px; color:var(--text-secondary); font-size:16px}
+  
+  /* 控制面板 */
+  .control-panel {
+    display: flex; gap: 20px; padding: 20px; margin-bottom: 24px;
+    border: 2px solid var(--border); border-radius: 20px;
+    background: #FDFDFB; align-items: flex-start; flex-wrap: wrap; 
+    box-shadow: inset 0 0 15px rgba(0,0,0,0.02);
+  }
+  /* 調整 flex-basis，讓動詞選擇和按鈕區塊佔用更少空間，讓表格佔用更多空間 */
+  .control-group { min-width: 150px; } 
+  .control-group.verb-select { flex: 1; max-width: 300px; } /* 讓下拉選單區塊有彈性但限制最大寬度 */
+  .control-group.verb-table { flex: 2; min-width: 450px; } /* 讓表格區塊擴大 */
+  .control-group.actions { flex: 0 0 auto; } /* 按鈕區不伸縮 */
+
+  
+  label{display:block;font-size:15px;color:var(--text-primary);margin-bottom:6px;font-weight: 700;}
+  select{
+    width:100%; padding:10px; border-radius:12px;
+    border:2px solid var(--border); font-size:16px; color: var(--text-primary);
+    background-color: #fff; cursor: pointer;
+    transition: all 0.2s;
+  }
+  select:focus { outline: none; border-color: var(--morandi-blue); box-shadow: 0 0 0 3px rgba(141, 161, 185, 0.2); }
+
+  /* 動詞選擇與按鈕的 flex 容器 */
+  .verb-control-box {
+      display: flex; 
+      gap: 8px; 
+      /* 確保下拉選單能盡可能擴大 */
+      width: 100%; 
+  }
+  .verb-control-box select {
+      flex: 1; /* 讓 select 佔用所有剩餘空間 */
+  }
+  .verb-control-box button {
+      flex-shrink: 0; /* 按鈕不壓縮 */
+  }
+
+
+  /* 莫蘭迪按鈕樣式 (扁平化帶柔和陰影) */
+  button{
+    background: var(--accent); color:white; padding:10px 20px;
+    border:none; border-radius:14px; cursor:pointer;
+    font-weight: 700; transition: all 0.2s; white-space: nowrap;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    transform: translateY(0); letter-spacing: 0.5px;
+  }
+  button:hover { background-color: var(--accent-dark); transform: translateY(-1px); box-shadow: 0 6px 8px -1px rgba(0, 0, 0, 0.15); }
+  button:active { transform: translateY(1px); box-shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.06); }
+  
+  button#applyVerb { background: var(--morandi-pink-dark); }
+  button#applyVerb:hover { background: #A69397; }
+
+  button.secondary{ background: var(--morandi-beige); color: var(--text-primary); box-shadow: none; border: 1px solid var(--border); }
+  button.secondary:hover { background: #D8D4CF; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+  button.secondary:active { background: #CFCBC6; }
+
+  /* 動詞變化表 */
+  #verbTable {
+    width: 100%; border-collapse: separate; border-spacing: 0; text-align: center;
+    background: white; border-radius: 16px; overflow: hidden;
+    border: 1px solid var(--border);
+    box-shadow: 0 4px 10px var(--shadow-color);
+  }
+  #verbTable th {
+    padding: 12px; background: var(--morandi-blue-dark); color: #f0f0f0;
+    font-size: 14px; font-weight: 600; letter-spacing: 1px;
+  }
+  #verbTable td {
+    padding: 12px; font-size: 18px; font-weight: 700;
+    color: var(--text-primary); border-bottom: 1px solid var(--border);
+    background: #FAFAFA;
+  }
+  #verbTable tr:last-child td { border-bottom: none; }
+  
+  /* 遊戲區域 */
+  .game-layout {
+    display: flex; gap: 24px; align-items: flex-start; position: relative;
+  }
+  .drop-targets {
+    flex: 3; display:grid; grid-template-columns: repeat(5, 1fr); gap: 15px;
+  }
+  /* 卡片來源區 (Sticky) - 柔和米粉色 */
+  .draggable-sentences {
+    flex: 1; min-width: 250px;
+    display: flex; flex-direction: column; gap: 12px; padding: 20px;
+    background: #F5F2F0; border-radius: 20px; border: 2px dashed var(--morandi-pink);
+    position: sticky; top: 20px; max-height: 85vh; overflow-y: auto;
+    box-shadow: inset 0 2px 10px rgba(0,0,0,0.03);
+  }
+  .draggable-sentences::-webkit-scrollbar { width: 6px; }
+  .draggable-sentences::-webkit-scrollbar-track { background: transparent; }
+  .draggable-sentences::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+  /* 目標區 - 柔和灰藍 */
+  .drop-target {
+    border: 2px dashed var(--border); border-radius: 16px; min-height: 120px;
+    padding: 10px; text-align: center; background-color: var(--drop-zone-bg);
+    transition: all 0.3s ease;
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+  }
+  .drop-target small {
+    color: var(--text-secondary); display:block; margin-bottom: 8px;
+    font-size: 14px; 
+    font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .drop-target.hover { border-color: var(--morandi-blue); background-color: #E3E8EE; transform: scale(1.02); }
+  
+  /* 即時回饋顏色 - 莫蘭迪版 */
+  .drop-target.correct-feedback { background-color: var(--success-bg); border: 2px solid var(--success); }
+  .drop-target.incorrect-feedback { background-color: var(--error-bg); border: 2px solid var(--error); }
+  
+  .feedback-message { font-size: 15px; font-weight: 700; margin-top: 8px; animation: fadedIn 0.4s; }
+  .feedback-message.ok { color: var(--success); }
+  .feedback-message.bad { color: var(--error); }
+  
+  /* 新增：分數遞減提示 */
+  .feedback-message .score-hint {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--morandi-blue-dark);
+      margin-left: 5px;
+  }
+
+  @keyframes fadedIn { from{opacity:0; transform:translateY(5px);} to{opacity:1; transform:translateY(0);} }
+
+  /* 句子卡片 */
+  .sentence-card {
+    background: #fff; padding: 16px; border-radius: 12px;
+    box-shadow: 0 2px 5px var(--shadow-color); cursor: grab;
+    border: 1px solid var(--border); 
+    font-size: 18px; 
+    font-weight: 600;
+    line-height: 1.5; transition: all 0.2s; color: var(--text-primary); 
+  }
+  .sentence-card:hover { transform: translateY(-2px); box-shadow: 0 8px 15px var(--shadow-color); border-color: var(--morandi-blue); }
+  .sentence-card:active { cursor: grabbing; transform: translateY(0); }
+
+  .highlight-verb {
+    color: var(--verb-highlight); font-weight: 900;
+    border-bottom: 2px solid rgba(217, 166, 140, 0.4);
+  }
+  .tense-group-label {
+    grid-column: 1 / -1; font-size: 18px; font-weight: 700; color: var(--text-primary);
+    margin: 25px 0 10px; padding-left: 12px; border-left: 4px solid var(--morandi-blue-dark); line-height: 1.2;
+    letter-spacing: 1px;
+  }
+
+  /* --- 成績單 Modal (莫蘭迪風格) --- */
+  #reportCardModal {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(50, 55, 60, 0.6); display: none; 
+    justify-content: center; align-items: center; z-index: 2000;
+    backdrop-filter: blur(5px);
+  }
+  .report-content {
+    background: #FAFAFA; padding: 0; border-radius: 20px;
+    box-shadow: 0 25px 50px rgba(0,0,0,0.15);
+    width: 95%; max-width: 800px; max-height: 95vh;
+    overflow-y: auto; color: var(--text-primary);
+    display: flex; flex-direction: column; border: 1px solid var(--border);
+  }
+  
+  .report-header-bg {
+    background: linear-gradient(135deg, var(--morandi-blue-dark), #7E8C9D); 
+    color: #F2F0EB; padding: 25px 35px; border-radius: 20px 20px 0 0;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .report-title h2 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: 1px; }
+  
+  .student-form {
+    display: flex; gap: 20px; padding: 25px 35px;
+    background: #fff; border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  .form-group label { color: var(--text-secondary); }
+  .form-group input {
+    border: 1px solid var(--border); border-radius: 8px;
+    font-family: inherit; color: var(--text-primary); background: #FDFDFB;
+  }
+  .form-group input:focus { border-color: var(--morandi-blue); box-shadow: 0 0 0 3px rgba(141, 161, 185, 0.1); }
+
+  .export-mode .student-form { background: white; border-bottom: 2px solid var(--morandi-blue-dark); }
+  .export-mode .form-group input { border: none; font-size: 20px; color: #333; margin-top: 0; background: transparent; }
+  
+  .score-section { text-align: center; padding: 30px; background: #FAFAFA; }
+  .big-score {
+    font-size: 90px; font-weight: 900; line-height: 1;
+    color: var(--morandi-blue-dark);
+    text-shadow: 2px 2px 0px var(--border);
+  }
+  .time-display {
+    background: var(--morandi-yellow); padding: 6px 16px; border-radius: 20px;
+    font-weight: 700; color: #8A8168; display: inline-block; margin-top: 15px; font-size: 14px;
+  }
+
+  .result-lists {
+    display: flex; gap: 20px; padding: 25px 35px; background: #fff;
+  }
+  .list-col { flex: 1; }
+  .list-title { border-bottom: 2px solid; padding-bottom: 8px; letter-spacing: 0.5px; margin-bottom: 15px; font-weight: 700; font-size: 16px; }
+  .correct-col .list-title { color: var(--success); border-color: var(--success); }
+  .error-col .list-title { color: var(--error); border-color: var(--error); }
+
+  .result-item { 
+    margin-bottom: 10px; padding: 12px; border-radius: 10px; 
+    box-shadow: 0 2px 5px rgba(0,0,0,0.03); border: 1px solid var(--border); 
+    background: #fff; font-size: 14px;
+  }
+  .result-item.correct { border-left: 5px solid var(--success); background: var(--success-bg); }
+  .result-item.wrong { border-left: 5px solid var(--error); background: var(--error-bg); }
+  
+  /* 錯題修正資訊 */
+  .wrong .item-label { color: var(--error); }
+  .wrong .score-info { color: var(--error); font-weight: 700; margin-top: 5px; }
+
+  .item-label { color: var(--text-secondary); margin-bottom: 5px; font-size: 13px; }
+  .comparison-box { margin-top: 8px; border-top: 1px dashed var(--border); padding-top: 8px; }
+  .ans-row { display: flex; align-items: baseline; gap: 10px; margin-bottom: 5px; }
+  .ans-tag { 
+    font-size: 11px; padding: 2px 6px; border-radius: 4px; color: white; font-weight: 700; 
+    letter-spacing: 0.5px;
+  }
+  .ans-tag.wrong { background: var(--error); }
+  .ans-tag.right { background: var(--success); }
+  .ans-text.wrong-text { color: var(--error); font-weight: 600; } 
+  .ans-text.right-text { color: var(--success); font-weight: 600; }
+
+  .report-footer { 
+    background: #fff; padding: 25px 35px; gap: 15px; 
+    border-top: 1px solid var(--border); display: flex; justify-content: flex-end;
+  }
+  
+  /* 下載按鈕 - 莫蘭迪色 */
+  .btn-download-pdf { background-color: var(--error); }
+  .btn-download-pdf:hover { background-color: #B07878; }
+  .btn-download-jpg { background-color: var(--morandi-blue); }
+  .btn-download-jpg:hover { background-color: var(--morandi-blue-dark); }
+
+  /* 列印樣式 */
+  @media print {
+    body > * { display: none; }
+    #reportCardModal { display: flex !important; background: white; position: absolute; top:0; left:0; }
+    .report-content { box-shadow: none; width: 100%; max-width: 100%; max-height: none; overflow: visible; padding: 0; border: none; background: white; }
+    .report-footer { display: none; }
+    .student-form { background: white; border-bottom: 2px solid #555; }
+    .form-group input { border: none; background: transparent; padding: 0; font-size: 18px; color: black; }
+    .result-lists { display: flex; }
+    .list-col { margin-bottom: 0; page-break-inside: avoid; }
+    .report-header-bg { background: #555; color: white; } 
+  }
+</style>
+</head>
+<body>
+<div class="container" id="gameContainer">
+  <div class="header-area">
+    <h1>互動式動詞配對遊戲</h1>
+    <span class="version-badge">Ver 6.4 分數遞減邏輯</span>
+  </div>
+  <p class="lead">將句子拖曳到對應的時態與句型分類中。錯誤配對後重配，分數將遞減。</p>
+
+  <div class="control-panel">
+    
+    <div class="control-group verb-select">
+      <label>選擇動詞 (及物動詞)</label>
+      <div class="verb-control-box">
+        <select id="verbSelect"></select>
+        <button id="applyVerb">更換題目 (開始計時)</button>
+      </div>
+    </div>
+
+    <div class="control-group verb-table"> 
+      <label>動詞三態變化表</label>
+      <table id="verbTable"></table>
+      <input type="hidden" id="base"><input type="hidden" id="past"><input type="hidden" id="pastPart"><input type="hidden" id="ing">
+    </div>
+    
+    <div class="control-group actions">
+      <label>功能操作</label>
+      <div style="display:flex; gap:10px;">
+        <button id="generateReportButton">成績結算</button>
+        <button id="resetGame" class="secondary">重設遊戲</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="game-layout">
+    <div class="drop-targets" id="dropTargets"></div>
+    <div class="draggable-sentences" id="draggableSentences">
+      <div style="text-align:center; padding: 40px 10px; color:var(--text-secondary);">
+        <p>準備好開始了嗎？</p>
+        <p>點擊上方 <strong>「更換題目」</strong> 生成亂數卡片</p>
+      </div>
+    </div>
+  </div>
+
+  <div style="font-size:15px; color:var(--text-secondary); margin-top:24px; text-align:center; border-top:1px solid var(--border); padding-top:16px;" id="status">
+    請選擇動詞並開始練習。
+  </div>
+</div>
+
+<div id="reportCardModal">
+    <div class="report-content" id="reportContentToCapture">
+        <div class="report-header-bg">
+            <div class="report-title">
+                <h2>句子配對練習成績單</h2>
+                <p>練習主題: 動詞時態與主被動變化</p>
+            </div>
+            <div style="text-align:right;">
+                <div style="font-size:12px; opacity:0.9;">練習動詞</div>
+                <div style="font-size:24px; font-weight:800; text-transform:uppercase; letter-spacing:1px;" id="reportVerb"></div>
+            </div>
+        </div>
+        
+        <div class="student-form" id="studentFormArea">
+            <div class="form-group">
+                <label>班級 (Class)</label>
+                <input type="text" id="inputClass" placeholder="例: 高一甲">
+            </div>
+            <div class="form-group">
+                <label>座號 (No.)</label>
+                <input type="text" id="inputID" placeholder="例: 01">
+            </div>
+            <div class="form-group" style="flex:2;">
+                <label>姓名 (Name)</label>
+                <input type="text" id="inputName" placeholder="請輸入姓名">
+            </div>
+        </div>
+
+        <div class="score-section">
+            <div class="score-label">TOTAL SCORE</div>
+            <div class="big-score"><span id="finalScore">0</span></div>
+            
+            <div style="margin-top: 15px; display:flex; justify-content:center; gap:20px; align-items:center;">
+                <div style="color:var(--text-primary); font-size:15px; font-weight: 600;">
+                    原始總分: <span id="maxScoreDisplay" style="font-weight:bold;">15</span> 題 (100分)
+                </div>
+                <div class="time-display">
+                    ⏱️ 答題時間: <span id="timeTakenDisplay">00:00</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="result-lists">
+            <div class="list-col correct-col">
+                <div class="list-title">
+                    <span>🟢 答對題目 (首次正確)</span>
+                    <span style="font-size:12px; opacity:0.8;">(Correct)</span>
+                </div>
+                <div id="correctListContainer"></div>
+            </div>
+
+            <div class="list-col error-col">
+                <div class="list-title">
+                    <span>🔴 錯誤與訂正 (含分數遞減)</span>
+                    <span style="font-size:12px; opacity:0.8;">(Corrections)</span>
+                </div>
+                <div id="errorListContainer"></div>
+            </div>
+        </div>
+
+        <div class="report-footer" data-html2canvas-ignore="true">
+            <button onclick="downloadJPG()" class="btn-download-jpg">下載 JPG 圖片</button>
+            <button onclick="downloadPDF()" class="btn-download-pdf">下載 PDF 文件</button>
+            <button onclick="closeReport()" class="secondary">關閉視窗</button>
+        </div>
+    </div>
+</div>
+
+<script>
+// --- 音效系統 (Web Audio API) ---
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+function playSound(type) {
+    if (audioCtx.state === 'suspended') { audioCtx.resume(); }
+    const osc = audioCtx.createOscillator();
+    const gainNode = audioCtx.createGain();
+    
+    osc.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+    
+    const now = audioCtx.currentTime;
+    
+    if (type === 'correct') {
+        // 叮咚聲 (柔和高頻)
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(600, now);
+        osc.frequency.exponentialRampToValueAtTime(1000, now + 0.1);
+        gainNode.gain.setValueAtTime(0.1, now); // 音量進一步降低
+        gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+        osc.start(now);
+        osc.stop(now + 0.4);
+    } else {
+        // 嗡嗡聲 (柔和低頻)
+        osc.type = 'triangle'; 
+        osc.frequency.setValueAtTime(180, now);
+        osc.frequency.linearRampToValueAtTime(120, now + 0.3);
+        gainNode.gain.setValueAtTime(0.1, now); // 音量進一步降低
+        gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+        osc.start(now);
+        osc.stop(now + 0.3);
+    }
+}
+
+// --- 計時器變數 ---
+let startTime = null;
+let endTime = null;
+
+const templates = [
+  {row:'Present',col:'Simple', label_zh:'現在 簡單式'},{row:'Present',col:'Continuous', label_zh:'現在 進行式'},{row:'Present',col:'Perfect', label_zh:'現在 完成式'},{row:'Present',col:'PerfCont', label_zh:'現在 完成進行式'},{row:'Present',col:'Passive', label_zh:'現在 被動式'},
+  {row:'Past',col:'Simple', label_zh:'過去 簡單式'},{row:'Past',col:'Continuous', label_zh:'過去 進行式'},{row:'Past',col:'Perfect', label_zh:'過去 完成式'},{row:'Past',col:'PerfCont', label_zh:'過去 完成進行式'},{row:'Past',col:'Passive', label_zh:'過去 被動式'},
+  {row:'Future',col:'Simple', label_zh:'未來 簡單式'},{row:'Future',col:'Continuous', label_zh:'未來 進行式'},{row:'Future',col:'Perfect', label_zh:'未來 完成式'},{row:'Future',col:'PerfCont', label_zh:'未來 完成進行式'},{row:'Future',col:'Passive', label_zh:'未來 被動式'}
+];
+
+const verbs = {
+  eat:  {base:'eat', past:'ate', pp:'eaten', ing:'eating', object:'a sandwich'},
+  write:{base:'write', past:'wrote', pp:'written', ing:'writing', object:'a letter'},
+  read: {base:'read', past:'read', pp:'read', ing:'reading', object:'a book'},
+  do:   {base:'do', past:'did', pp:'done', ing:'doing', object:'homework'},
+  make: {base:'make', past:'made', pp:'made', ing:'making', object:'a cake'},
+  take: {base:'take', past:'took', pp:'taken', ing:'taking', object:'a photo'},
+  see:  {base:'see', past:'saw', pp:'seen', ing:'seeing', object:'a bird'},
+  catch:{base:'catch', past:'caught', pp:'caught', ing:'catching', object:'the ball'},
+  wash: {base:'wash', past:'washed', pp:'washed', ing:'washing', object:'the car'},
+  clean:{base:'clean', past:'cleaned', pp:'cleaned', ing:'cleaning', object:'the room'},
+  open: {base:'open', past:'opened', pp:'opened', ing:'opening', object:'the box'},
+  close:{base:'close', past:'closed', pp:'closed', ing:'closing', object:'the door'},
+  buy:  {base:'buy', past:'bought', pp:'bought', ing:'buying', object:'a gift'},
+  fix:  {base:'fix', past:'fixed', pp:'fixed', ing:'fixing', object:'the toy'},
+  drink:{base:'drink', past:'drank', pp:'drunk', ing:'drinking', object:'the juice'},
+  teach:{base:'teach', past:'taught', pp:'taught', ing:'teaching', object:'English'},
+  paint:{base:'paint', past:'painted', pp:'painted', ing:'painting', object:'the wall'},
+  love: {base:'love', past:'loved', pp:'loved', ing:'loving', object:'the dog'},
+  help: {base:'help', past:'helped', pp:'helped', ing:'helping', object:'people'},
+  find: {base:'find', past:'found', pp:'found', ing:'finding', object:'the key'}
+};
+
+let current = verbs.eat; 
+let sentenceData = [];
+
+// *** 新增：追蹤每張卡片的狀態 ***
+let cardState = {}; // { sentenceId: { attempts: 0, initialError: false, isCorrect: false } }
+
+const row_zh = {'Present':'現在式', 'Past':'過去式', 'Future':'未來式'};
+const col_zh = {'Simple':'簡單式', 'Continuous':'進行式', 'Perfect':'完成式', 'PerfCont':'完成進行式', 'Passive':'被動式'};
+
+function highlight(text) {
+    return `<span class="highlight-verb">${text}</span>`;
+}
+
+function sample(i, verbContext = current){
+  const t = templates[i];
+  const o = verbContext.object; 
+  const {base: b, past: p, pp, ing} = verbContext;
+  
+  const objectCap = o.charAt(0).toUpperCase() + o.slice(1);
+  const subject = 'He';
+  
+  const isPlural = o.toLowerCase().endsWith('s') && !o.endsWith('ss'); 
+  
+  if (t.col === 'Passive') {
+    let beForm = '';
+
+    if(t.row==='Present') {
+      if(t.col==='Passive'){
+        beForm = isPlural ? 'are' : 'is';
+        return`${objectCap} ${highlight(`${beForm} ${pp}`)}.`;
+      }
+    }
+    else if(t.row==='Past') {
+      if(t.col==='Passive'){
+        beForm = isPlural ? 'were' : 'was';
+        return`${objectCap} ${highlight(`${beForm} ${pp}`)}.`;
+      }
+    }
+    
+    // Future Passive
+    if(t.row==='Future' && t.col==='Passive') {
+        return`${objectCap} ${highlight(`will be ${pp}`)}.`;
+    }
+  }
+
+  // Active Voice
+  if(t.col==='Simple'){
+    if(t.row==='Present') {
+        // *** 修正：處理 do/does 拼寫錯誤 ***
+        if (b === 'do') {
+            return`${subject} ${highlight(`does`)} ${o}.`;
+        }
+        return`${subject} ${highlight(`${b}s`)} ${o}.`;
+    }
+    if(t.row==='Past')return`${subject} ${highlight(p)} ${o}.`;
+    return`${subject} ${highlight(`will ${b}`)} ${o}.`;
+  }
+  if(t.col==='Continuous'){
+    if(t.row==='Present')return`${subject} ${highlight(`is ${ing}`)} ${o}.`;
+    if(t.row==='Past')return`${subject} ${highlight(`was ${ing}`)} ${o}.`;
+    return`${subject} ${highlight(`will be ${ing}`)} ${o}.`;
+  }
+  if(t.col==='Perfect'){
+    if(t.row==='Present')return`${subject} ${highlight(`has ${pp}`)} ${o}.`;
+    if(t.row==='Past')return`${subject} ${highlight(`had ${pp}`)} ${o}.`;
+    return`${subject} ${highlight(`will have ${pp}`)} ${o}.`;
+  }
+  if(t.col==='PerfCont'){
+    if(t.row==='Present')return`${subject} ${highlight(`has been ${ing}`)} ${o}.`;
+    if(t.row==='Past')return`${subject} ${highlight(`had been ${ing}`)} ${o}.`;
+    return`${subject} ${highlight(`will have been ${ing}`)} ${o}.`;
+  }
+}
+
+function updateVerbTable(verb) {
+    const table = document.getElementById('verbTable');
+    table.innerHTML = `
+        <thead>
+            <tr><th>原型 (Base)</th><th>過去式 (Past)</th><th>過去分詞 (P.P.)</th><th>現在分詞 (V-ing)</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>${verb.base}</td><td>${verb.past}</td><td>${verb.pp}</td><td>${verb.ing}</td></tr>
+        </tbody>
+    `;
+    document.getElementById('base').value=verb.base;
+    document.getElementById('past').value=verb.past;
+    document.getElementById('pastPart').value=verb.pp;
+    document.getElementById('ing').value=verb.ing;
+}
+
+function fillVerbSelect() {
+    const select = document.getElementById('verbSelect');
+    select.innerHTML = '';
+    const verbKeys = Object.keys(verbs).sort();
+    verbKeys.forEach(key => {
+        const v = verbs[key];
+        const option = document.createElement('option');
+        option.value = key;
+        option.textContent = `${key} (${v.object})`;
+        select.appendChild(option);
+    });
+}
+fillVerbSelect(); 
+
+function buildDropTargets(){
+  const dropTargets=document.getElementById('dropTargets');
+  dropTargets.innerHTML='';
+  let lastRow = '';
+  templates.forEach((t,i)=>{
+    if (t.row !== lastRow) {
+        const labelDiv = document.createElement('div');
+        labelDiv.className = 'tense-group-label';
+        labelDiv.textContent = row_zh[t.row];
+        dropTargets.appendChild(labelDiv);
+        lastRow = t.row;
+    }
+    const div=document.createElement('div');
+    div.className='drop-target';
+    div.setAttribute('data-target-id', i);
+    div.innerHTML=`<small>${col_zh[t.col]} (${row_zh[t.row]})</small>`; 
+    // *** 新增：目標區追蹤卡片 ID，用於分數計算時回查狀態 ***
+    div.setAttribute('data-card-id', ''); 
+    dropTargets.appendChild(div);
+  });
+}
+
+function buildDraggableSentences(){
+  const draggableSentences=document.getElementById('draggableSentences');
+  draggableSentences.innerHTML='';
+  sentenceData = [];
+  cardState = {}; // 重設卡片狀態
+
+  for(let i=0; i<templates.length; i++){
+    sentenceData.push({
+      id: i,
+      sentence: sample(i), 
+      correctTargetId: i,
+      // *** 初始化卡片狀態 ***
+      attempts: 0,
+      initialError: false, 
+      isCorrect: false
+    });
+    // 儲存到全域狀態追蹤器
+    cardState[i] = { attempts: 0, initialError: false, isCorrect: false };
+  }
+
+  sentenceData.sort(() => 0.5 - Math.random());
+
+  sentenceData.forEach((data)=>{
+    const div = document.createElement('div');
+    div.className = 'sentence-card';
+    div.setAttribute('draggable', 'true');
+    div.setAttribute('data-sentence-id', data.id); 
+    div.innerHTML = data.sentence; 
+    draggableSentences.appendChild(div);
+  });
+
+  attachDragListeners();
+}
+
+function applyVerb(){
+  const v=document.getElementById('verbSelect').value;
+  current = verbs[v];
+  updateVerbTable(current); 
+  buildDropTargets();
+  buildDraggableSentences(); 
+  
+  // 重置並開始計時
+  startTime = Date.now();
+  endTime = null;
+  
+  document.getElementById('status').textContent=`已選擇：${current.base}。計時開始！請拖曳句子卡片。`;
+}
+
+document.getElementById('applyVerb').onclick=applyVerb;
+document.getElementById('resetGame').onclick=applyVerb; 
+
+// --- Drag & Drop ---
+let draggedItem = null;
+function handleDragStart(e) {
+  draggedItem = e.target;
+  e.dataTransfer.setData('text/plain', e.target.getAttribute('data-sentence-id'));
+  setTimeout(() => e.target.classList.add('dragged'), 0);
+  
+  // 紀錄卡片從哪個目標區被拖出 (如果有的話)
+  const parent = draggedItem.parentNode;
+  if(parent && parent.classList.contains('drop-target')) {
+    parent.setAttribute('data-card-id', ''); // 清除目標區紀錄
+    removeFeedback(parent); // 清除回饋
+  }
+}
+function handleDragEnd(e) {
+  e.target.classList.remove('dragged');
+  draggedItem = null;
+}
+function handleDragOver(e) {
+  e.preventDefault();
+  const targetElement = e.target.closest('.drop-target');
+  if (targetElement && !targetElement.querySelector('.sentence-card')) {
+     targetElement.classList.add('hover');
+  }
+}
+function handleDragLeave(e) {
+  e.target.closest('.drop-target')?.classList.remove('hover');
+}
+function removeFeedback(element) {
+    if (element && element.classList.contains('drop-target')) {
+        element.classList.remove('correct-feedback', 'incorrect-feedback');
+        let oldFeedback = element.querySelector('.feedback-message');
+        if (oldFeedback) oldFeedback.remove();
+    }
+}
+
+function getScoreHint(attempts) {
+    if (attempts === 0) return ' (首次配對)';
+    const scoreFraction = 1 / (attempts + 1);
+    const scorePercent = Math.round(scoreFraction * 100);
+    return ` (修正，本次得分: ${scorePercent}%)`;
+}
+
+function handleDrop(e) {
+  e.preventDefault();
+  const targetElement = e.target.closest('.drop-target');
+  if (!targetElement) return;
+  targetElement.classList.remove('hover');
+  if (targetElement.querySelector('.sentence-card')) return; 
+
+  if (draggedItem) {
+    const droppedSentenceId = parseInt(draggedItem.getAttribute('data-sentence-id'));
+    const targetId = parseInt(targetElement.getAttribute('data-target-id'));
+
+    // 清除原位置的回饋 (如果卡片是從來源區拖來，這裡不會有效果)
+    removeFeedback(draggedItem.parentNode); 
+    
+    // 執行移動
+    targetElement.appendChild(draggedItem);
+    targetElement.setAttribute('data-card-id', droppedSentenceId); // 紀錄卡片 ID
+
+    // *** 更新卡片狀態和回饋邏輯 ***
+    const state = cardState[droppedSentenceId];
+    state.attempts++; // 移動次數 +1 (相當於配對次數)
+    
+    removeFeedback(targetElement); 
+    const feedback = document.createElement('div');
+    feedback.className = 'feedback-message';
+
+    if (droppedSentenceId === targetId) {
+      targetElement.classList.add('correct-feedback');
+      feedback.textContent = '✓ 正確';
+      feedback.classList.add('ok');
+      feedback.innerHTML += `<span class="score-hint">${getScoreHint(state.attempts - 1)}</span>`; // 第一次移動 attempts=1, attempts-1=0
+      
+      // 首次答錯後，再答對，才計算得分遞減
+      if (state.attempts > 1) {
+          state.initialError = true;
+      }
+      state.isCorrect = true;
+      playSound('correct'); 
+    } else {
+      targetElement.classList.add('incorrect-feedback');
+      feedback.textContent = '✗ 錯誤';
+      feedback.classList.add('bad');
+      feedback.innerHTML += `<span class="score-hint"> (請重新拖曳至正確位置)</span>`;
+      
+      state.initialError = true; // 只要錯過一次，就算有錯誤紀錄
+      state.isCorrect = false;
+      playSound('incorrect');
+    }
+    
+    targetElement.appendChild(feedback);
+    updateScoreDisplay();
+  }
+}
+
+document.getElementById('draggableSentences').addEventListener('dragover', (e) => {e.preventDefault();});
+document.getElementById('draggableSentences').addEventListener('drop', (e) => {
+    e.preventDefault();
+    if (draggedItem && draggedItem.classList.contains('sentence-card')) {
+        const droppedSentenceId = parseInt(draggedItem.getAttribute('data-sentence-id'));
+        const parent = draggedItem.parentNode;
+        
+        // 如果是從目標區拖回來源區
+        if(parent && parent.classList.contains('drop-target')) {
+            parent.setAttribute('data-card-id', ''); // 清除目標區紀錄
+            removeFeedback(parent); // 清除回饋
+            cardState[droppedSentenceId].isCorrect = false; // 拖出後，狀態改為未完成
+        }
+
+        e.currentTarget.appendChild(draggedItem);
+        updateScoreDisplay();
+    }
+});
+
+function attachDragListeners() {
+  document.querySelectorAll('.sentence-card').forEach(card => {
+    card.addEventListener('dragstart', handleDragStart);
+    card.addEventListener('dragend', handleDragEnd);
+  });
+  document.querySelectorAll('.drop-target').forEach(target => {
+    target.addEventListener('dragover', handleDragOver);
+    target.addEventListener('dragleave', handleDragLeave);
+    target.addEventListener('drop', handleDrop);
+  });
+}
+function updateScoreDisplay() {
+    let correctCount = 0;
+    document.querySelectorAll('.drop-target').forEach(target => {
+        if (target.classList.contains('correct-feedback')) correctCount++;
+    });
+    document.getElementById('status').textContent = `當前進度：已完成 ${correctCount}/${templates.length} 句配對。`;
+}
+
+// --- Report Card Logic ---
+document.getElementById('generateReportButton').onclick = generateReportCard;
+
+function generateReportCard() {
+    // 停止計時
+    if(!endTime) endTime = Date.now();
+    const duration = Math.floor((endTime - startTime) / 1000); // seconds
+    const minutes = Math.floor(duration / 60).toString().padStart(2, '0');
+    const seconds = (duration % 60).toString().padStart(2, '0');
+    
+    // 載入資料
+    document.getElementById('inputClass').value = localStorage.getItem('studentClass') || '';
+    document.getElementById('inputID').value = localStorage.getItem('studentID') || '';
+    document.getElementById('inputName').value = localStorage.getItem('studentName') || '';
+
+    let totalScoreValue = 0;
+    let correctCount = 0;
+    const totalCount = templates.length;
+    const scorePerItem = 100 / totalCount;
+
+    let initialCorrectListHTML = '';
+    let errorListHTML = '';
+    
+    document.querySelectorAll('.drop-targets .drop-target').forEach(target => {
+        const cardId = parseInt(target.getAttribute('data-card-id'));
+        const targetId = parseInt(target.getAttribute('data-target-id'));
+        const targetLabel = target.querySelector('small').textContent;
+        const correctSentence = sample(targetId).replace(/<[^>]*>/g, ''); 
+        
+        const state = cardId in cardState ? cardState[cardId] : { attempts: 0, initialError: false, isCorrect: false };
+        const cardElement = target.querySelector('.sentence-card');
+
+        // 1. 未作答情況
+        if (!cardElement) {
+            errorListHTML += `
+                <div class="result-item wrong">
+                    <div class="item-label">${targetLabel} (未作答)</div>
+                    <div class="score-info">得分: 0%</div>
+                    <div class="comparison-box">
+                        <div class="ans-row">
+                            <span class="ans-tag right">正確答案</span>
+                            <span class="ans-text right-text">${correctSentence}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+            return;
+        }
+        
+        const studentAns = cardElement.textContent.trim();
+        let scorePercent = 0;
+
+        // 2. 最終配對正確
+        if (cardId === targetId) {
+            
+            // 計算得分百分比 (第一次嘗試 attempts=1 -> 100%; 第二次嘗試 attempts=2 -> 50%)
+            const scoreFraction = 1 / state.attempts;
+            scorePercent = Math.round(scoreFraction * 100);
+            totalScoreValue += scorePerItem * scoreFraction;
+
+            if (state.attempts === 1) {
+                // 首次答對 (100% 得分) -> 歸類在「首次正確」區
+                correctCount++;
+                initialCorrectListHTML += `
+                    <div class="result-item correct">
+                        <div class="item-label">${targetLabel}</div>
+                        <div style="font-weight:600;">${studentAns}</div>
+                    </div>
+                `;
+            } else {
+                // 多次嘗試後答對 (分數遞減) -> 歸類在「錯誤與訂正」區
+                errorListHTML += `
+                    <div class="result-item wrong">
+                        <div class="item-label">${targetLabel}</div>
+                        <div class="score-info">修正後答對。得分: ${scorePercent}% (嘗試 ${state.attempts} 次)</div>
+                        <div class="comparison-box">
+                            <div class="ans-row">
+                                <span class="ans-tag right">正確答案</span>
+                                <span class="ans-text right-text">${correctSentence}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+        } 
+        // 3. 最終配對錯誤
+        else {
+            // 答錯，得分 0%
+            totalScoreValue += 0;
+            errorListHTML += `
+                <div class="result-item wrong">
+                    <div class="item-label">${targetLabel}</div>
+                    <div class="score-info">最終答案錯誤。得分: 0%</div>
+                    <div class="comparison-box">
+                        <div class="ans-row">
+                            <span class="ans-tag wrong">你的答案</span>
+                            <span class="ans-text wrong-text">${studentAns}</span>
+                        </div>
+                        <div class="ans-row">
+                            <span class="ans-tag right">正確答案</span>
+                            <span class="ans-text right-text">${correctSentence}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+    });
+
+    const finalScore = Math.round(totalScoreValue);
+
+    document.getElementById('reportVerb').textContent = current.base;
+    document.getElementById('finalScore').textContent = finalScore;
+    document.getElementById('maxScoreDisplay').textContent = `${totalCount} 題 (100分，每題約 ${Math.round(scorePerItem)} 分)`;
+    document.getElementById('timeTakenDisplay').textContent = `${minutes}:${seconds}`;
+
+    document.getElementById('correctListContainer').innerHTML = initialCorrectListHTML || '<div style="color:var(--text-secondary); font-size:14px;">無首次正確題目</div>';
+    document.getElementById('errorListContainer').innerHTML = errorListHTML || '<div style="color:var(--success); font-weight:bold;">太棒了！所有題目均首次正確！</div>';
+
+    document.getElementById('reportCardModal').style.display = 'flex';
+}
+
+function getFilename(ext) {
+    const cls = document.getElementById('inputClass').value.trim() || 'Class';
+    const name = document.getElementById('inputName').value.trim() || 'Name';
+    const id = document.getElementById('inputID').value.trim() || 'No';
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}${month}${day}-${cls}-${name}-${id}.${ext}`;
+}
+
+function prepareForExport() {
+    const content = document.querySelector('.report-content');
+    content.classList.add('export-mode');
+    content.style.overflow = 'visible'; 
+    content.style.maxHeight = 'none';
+}
+
+function resetAfterExport() {
+    const content = document.querySelector('.report-content');
+    content.classList.remove('export-mode');
+    content.style.overflow = 'auto';
+    content.style.maxHeight = '95vh';
+}
+
+function downloadJPG() {
+    prepareForExport();
+    const element = document.querySelector('#reportContentToCapture');
+    const footer = document.querySelector('.report-footer');
+    footer.style.display = 'none';
+
+    html2canvas(element, { scale: 2 }).then(canvas => {
+        const link = document.createElement('a');
+        link.download = getFilename('jpg');
+        link.href = canvas.toDataURL('image/jpeg', 0.9);
+        link.click();
+        footer.style.display = 'flex';
+        resetAfterExport();
+    });
+}
+
+function downloadPDF() {
+    prepareForExport();
+    const element = document.querySelector('#reportContentToCapture');
+    const footer = document.querySelector('.report-footer');
+    footer.style.display = 'none';
+
+    html2canvas(element, { scale: 2 }).then(canvas => {
+        const imgData = canvas.toDataURL('image/png');
+        const pdf = new jspdf.jsPDF('p', 'mm', 'a4');
+        const pdfWidth = pdf.internal.pageSize.getWidth();
+        const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+        
+        pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+        pdf.save(getFilename('pdf'));
+        footer.style.display = 'flex';
+        resetAfterExport();
+    });
+}
+
+function closeReport() {
+    localStorage.setItem('studentClass', document.getElementById('inputClass').value);
+    localStorage.setItem('studentID', document.getElementById('inputID').value);
+    localStorage.setItem('studentName', document.getElementById('inputName').value);
+    document.getElementById('reportCardModal').style.display = 'none';
+}
+
+// 確保初始載入時有表格和卡片
+applyVerb(); 
+</script>
+</body>
+</html>
